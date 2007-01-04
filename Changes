@@ -1,3 +1,13 @@
+* v1.21 Thu Jan  4 13:41:42 PST 2007
+
+   * Use Module::Install
+   * Prefer Encode::Detect::Detector over Encode::Detect if available.
+   * Skip over Lyrics3 tags
+   * Pull out iTunes iTunNORM gain info.
+   * Handle Named genres separated by nulls & multiple genres
+   * Skip over broken iTunes ID3v2.2 frames that are in a ID3v2.3/2.4 header.
+   * Patch from Justin Fletcher <gerph (at) gerph.org> to fix ID3v2.4 header & footer parsing.
+
 * v1.20, Saturday, January 7, 2006
 
    * New maintainer & Sponsor: 
