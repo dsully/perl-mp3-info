@@ -1,3 +1,13 @@
+* v1.23 Thu Jul 26 14:11:08 2007
+
+   * Handle all tags with NULL delimited lists - Patch from Justin Fletcher <gerph (at) gerph.org>
+   * Fix MP3::Info for tag reading in AIF (and WAV, presumably) - kdf
+   * Read RVA2 (signed short) in big-endian order - andyg
+
+* v1.22 Tue Mar 13 16:16:59 2007
+
+   * Backwards compatibility changes for non-SlimServer callers of MP3::Info
+
 * v1.21 Thu Jan  4 13:41:42 PST 2007
 
    * Use Module::Install

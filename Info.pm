@@ -37,7 +37,7 @@ use vars qw(
 
 # $Id$
 ($REVISION) = ' $Revision: 1.19 $ ' =~ /\$Revision:\s+([^\s]+)/;
-$VERSION = '1.21';
+$VERSION = '1.23';
 
 # JRF: Whether we're debugging the ID3v2.4 support
 $debug_24 = 0;
@@ -657,6 +657,9 @@ sub _get_v1tag {
 		}
 
 		$info->{$key} = Encode::decode(ref($icode) ? $icode->name : 'iso-8859-1', $info->{$key});
+		
+		# Trim any trailing nuls
+		$info->{$key} =~ s/\x00+$//g;
 	}
 
 	Encode::Guess->set_suspects(keys %{$oldSuspects});
@@ -665,7 +668,7 @@ sub _get_v1tag {
 }
 
 sub _parse_v2tag {
-	my ($raw_v2, $v2, $info) = @_;
+	my ($ver, $raw_v2, $v2, $info) = @_;
 
 	# Make sure any existing TXXX flags are an array.
 	# As we might need to append comments to it below.
@@ -840,6 +843,8 @@ sub _parse_v2tag {
 					$data =~ s/^(?:...)//;		# strip language
 				}
 
+				# JRF: I believe this should probably only be applied to the text frames
+				#      and not every single frame.
 				if ($UNICODE) {
 
 					if ($encoding eq "\001" || $encoding eq "\002") {  # UTF-16, UTF-16BE
@@ -983,16 +988,41 @@ sub _parse_v2tag {
 
 						$data = $data->[0];
 					}
+
+				} elsif ($id =~ /^T...?$/ && $id ne 'TXXX') {
+					
+					# In ID3v2.4 there's a slight content change for text fields.
+					#      They can contain multiple values which are nul terminated
+					#      within the frame. We ONLY want to split these into multiple
+					#      array values if they didn't request raw values (1).
+					#        raw_v2 = 0 => parse simply
+					#        raw_v2 = 1 => don't parse
+					#        raw_v2 = 2 => do split into arrayrefs
+					
+					if ($data =~ /\x00/ && ($raw_v2 == 2 || $raw_v2 == 0))
+					{
+						# There are embedded nuls in the string, which means an ID3v2.4
+						# multi-value frame. And they wanted arrays rather than simple
+						# values.
+						# Strings are already UTF-8, so any double nuls from 16 bit
+						# characters will have already been reduced to single nuls.
+						$data = [ split /\000/, $data ];
+					}
 				}
 
-				if ($raw_v2 == 2 && $desc) {
+				if ($desc)
+				{
+					# It's a frame with a description, so we may need to construct a hash
+					# for the data, rather than an array.
+					if ($raw_v2 == 2) {
 
-					$data = { $desc => $data };
+						$data = { $desc => $data };
 
-				} elsif ($desc && $desc =~ /^iTun/) {
+					} elsif ($desc =~ /^iTun/) {
 
-					# leave iTunes tags alone.
-					$data = join(' ', $desc, $data);
+						# leave iTunes tags alone.
+						$data = join(' ', $desc, $data);
+					}
 				}
 
 				if ($raw_v2 == 2 && exists $info->{$hash->{$id}}) {
@@ -1030,15 +1060,28 @@ sub _parse_v2tag {
 						# If we have multiple values
 						# for the same key - turn them
 						# into an array ref.
-						if ($info->{$key} && !ref($info->{$key})) {
+						if ($ver == 2 && $info->{$key} && !ref($info->{$key})) {
 
-							my $old = delete $info->{$key};
+							if (ref($data) eq "ARRAY") {
+							
+								$info->{$key} = [ $info->{$key}, @$data ];
+							} else {
+							
+								my $old = delete $info->{$key};
+							
+								@{$info->{$key}} = ($old, $data);
+							}
 
-							@{$info->{$key}} = ($old, $data);
+						} elsif ($ver == 2 && ref($info->{$key}) eq 'ARRAY') {
+							
+							if (ref($data) eq "ARRAY") {
 
-						} elsif (ref($info->{$key}) eq 'ARRAY') {
+								push @{$info->{$key}}, @$data;
 
-							push @{$info->{$key}}, $data;
+							} else {
+
+								push @{$info->{$key}}, $data;
+							}
 
 						} else {
 
@@ -1101,13 +1144,13 @@ sub _get_v2tag {
 	    for $i ( 0..$#chk )
 	    {
 	      my $ielement = $chk[$i];
-	      if (defined $chk[$i])
+	      if (defined $ielement)
 	      {
 	        for $o ( ($i+1)..$#chk )
 	        {
-	          $chk[$o] = undef if (defined $ielement && defined $o && defined $chk[$o] && $ielement eq $chk[$o]);
+	          $chk[$o] = undef if (defined $o && defined $chk[$o] && ($ielement eq $chk[$o]));
 	        }
-	        push @array, $chk[$i];
+	        push @array, $ielement;
 	      }
 	    }
 	    # We may have reduced the array to a single element. If so, just assign
@@ -1453,7 +1496,7 @@ sub _get_v2tagdata {
 
 		} else {
 
-			_parse_v2tag($raw, $v2, $info);
+			_parse_v2tag($ver, $raw, $v2, $info);
 
 			if ($ver == 0 && $info->{'TAGVERSION'}) {
 				$info->{'TAGVERSION'} .= ' / ' . $v2h->{'version'};
@@ -2020,13 +2063,17 @@ sub _find_id3_chunk {
 	my($fh, $filetype) = @_;
 	my($bytes, $size, $tag, $pat, $mat);
 
-	read $fh, $bytes, 1;
+	# CHANGE 10616 introduced a read optimization in _get_v2head:
+	#  10 bytes are read, not 3, so reading one here hoping to get the last letter of the
+	#  tag is a bad idea, as it always fails...
+	
+#	read $fh, $bytes, 1;
 	if ($filetype eq 'RIF') {  # WAV
-		return 0 if $bytes ne 'F';
+#		return 0 if $bytes ne 'F';
 		$pat = 'a4V';
 		$mat = 'id3 ';
 	} elsif ($filetype eq 'FOR') { # AIFF
-		return 0 if $bytes ne 'M';
+#		return 0 if $bytes ne 'M';
 		$pat = 'a4N';
 		$mat = 'ID3 ';
 	}
@@ -2047,7 +2094,7 @@ sub _unpack_head {
 
 sub _grab_int_16 {
         my $data  = shift;
-        my $value = unpack('s',substr($$data,0,2));
+        my $value = unpack('s', pack('S', unpack('n',substr($$data,0,2))));
         $$data    = substr($$data,2);
         return $value;
 }
@@ -2767,7 +2814,7 @@ Justin Fletcher.
 
 =head1 CURRENT AUTHOR 
 
-Dan Sully E<lt>dan | at | slimdevices.comE<gt> & Slim Devices, Inc.
+Dan Sully E<lt>dan | at | slimdevices.comE<gt> & Logitech.
 
 =head1 AUTHOR EMERITUS
 
@@ -2775,7 +2822,7 @@ Chris Nandor E<lt>pudge@pobox.comE<gt>, http://pudge.net/
 
 =head1 COPYRIGHT AND LICENSE 
 
-Copyright (c) 2006 Dan Sully & Slim Devices, Inc. All rights reserved. 
+Copyright (c) 2006-2007 Dan Sully & Logitech. All rights reserved. 
 
 Copyright (c) 1998-2005 Chris Nandor. All rights reserved. 
 
@@ -2786,7 +2833,7 @@ the same terms as Perl itself.
 
 =over 4
 
-=item Slim Devices
+=item Logitech/Slim Devices
 
 	http://www.slimdevices.com/
 
@@ -2818,7 +2865,6 @@ the same terms as Perl itself.
 =item Xmms
 
 	http://www.xmms.org/
-
 
 =back
 
