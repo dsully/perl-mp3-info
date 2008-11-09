@@ -36,7 +36,7 @@ use vars qw(
 );
 
 # $Id$
-($REVISION) = ' $Revision: 1.19 $ ' =~ /\$Revision:\s+([^\s]+)/;
+($REVISION) = ' $Revision$ ' =~ /\$Revision:\s+([^\s]+)/;
 $VERSION = '1.24';
 
 # JRF: Whether we're debugging the ID3v2.4 support
@@ -801,8 +801,8 @@ sub _parse_v2tag {
 
 					$pic_len += 1 + length($description) + 1;
 
-					# skip extra terminating null if unicode
-					if ($encoding) { $pic_len++; }
+					# skip extra terminating null if UTF-16 (encoding 1 or 2)
+					if ( $encoding == 1 || $encoding == 2 ) { $pic_len++; }
 
 					$valid_pic  = 1;
 					$pic_format = $format;
@@ -838,7 +838,7 @@ sub _parse_v2tag {
 				my $desc;
 
 				# Comments & Unsyncronized Lyrics have the same format.
-				if ($id =~ /^(COM[M ]?|USLT)$/) { # space for iTunes brokenness
+				if ($id =~ /^(COM[M ]?|US?LT)$/) { # space for iTunes brokenness
 
 					$data =~ s/^(?:...)//;		# strip language
 				}
@@ -899,12 +899,18 @@ sub _parse_v2tag {
 					# convert to ASCII per best-effort
 					my $pat;
 					if ($data =~ s/^\xFF\xFE//) {
+						# strip additional BOMs as seen in COM(M?) and TXX(X?)
+						$data = join ("",map { ( /^(..)$/ && ! /(\xFF\xFE)/ )? $_: "" } (split /(..)/, $data));
 						$pat = 'v';
 					} elsif ($data =~ s/^\xFE\xFF//) {
+						# strip additional BOMs as seen in COM(M?) and TXX(X?)
+						$data = join ("",map { ( /^(..)$/ && ! /(\xFF\xFE)/ )? $_: "" } (split /(..)/, $data));
 						$pat = 'n';
 					}
 
 					if ($pat) {
+						# strip additional 0s
+						$data = join ("",map { ( /^(..)$/ && ! /(\x00\x00)/ )? $_: "" } (split /(..)/, $data));
 						$data = pack 'C*', map {
 							(chr =~ /[[:ascii:]]/ && chr =~ /[[:print:]]/)
 								? $_
@@ -915,7 +921,7 @@ sub _parse_v2tag {
 
 				# We do this after decoding so we could be certain we're dealing
 				# with 8-bit text.
-				if ($id =~ /^(COM[M ]?|USLT)$/) { # space for iTunes brokenness
+				if ($id =~ /^(COM[M ]?|US?LT)$/) { # space for iTunes brokenness
 
 					$data =~ s/^(.*?)\000//;	# strip up to first NULL(s),
 									# for sub-comments (TODO:
@@ -1100,7 +1106,7 @@ sub _parse_v2tag {
 }
 
 sub _get_v2tag {
-	my ($fh, $ver, $raw, $info) = @_;
+	my ($fh, $ver, $raw, $info, $start) = @_;
 	my $eof;
 	my $gotanyv2 = 0;
 
@@ -1124,7 +1130,7 @@ sub _get_v2tag {
 	}
 
 	# Now read any ID3v2 header
-	$gotanyv2 |= (_get_v2tagdata($fh, $ver, $raw, $info, undef) ? 1 : 0);
+	$gotanyv2 |= (_get_v2tagdata($fh, $ver, $raw, $info, $start) ? 1 : 0);
 
 	# Because we've merged the entries it makes sense to trim any duplicated
 	# values - for example if there's a footer and a header that contain the same
@@ -1231,21 +1237,27 @@ sub _get_v2tagdata {
 		$v2 = $info;
 	}
 
+	# Bug 8939, Trying to read past the end of the file may crash on win32 
+	my $size = -s $fh;
+	if ( $v2h->{offset} + $end > $size ) {
+		$end -= $v2h->{offset} + $end - $size;
+	}
+
 	seek $fh, $v2h->{offset}, SEEK_SET;
 	read $fh, $wholetag, $end;
 
-        # JRF: The discrepency between ID3v2.3 and ID3v2.4 is that :
-        #          2.3: unsync flag indicates that unsync is used on the entire tag
-        #          2.4: unsync flag indicates that all frames have the unsync bit set
-        #      In 2.4 this means that the size of the frames which have the unsync bit
-        #      set will be the unsync'd size (section 4. in the ID3v2.4.0 structure
-        #      specification).
-        #      This means that when processing 2.4 files we should perform all the
-        #      unsynchronisation processing at the frame level, not the tag level.
-        #      The tag unsync bit is redundant (IMO).
-        if ($v2h->{major_version} == 4) {
+	# JRF: The discrepency between ID3v2.3 and ID3v2.4 is that :
+	#          2.3: unsync flag indicates that unsync is used on the entire tag
+	#          2.4: unsync flag indicates that all frames have the unsync bit set
+	#      In 2.4 this means that the size of the frames which have the unsync bit
+	#      set will be the unsync'd size (section 4. in the ID3v2.4.0 structure
+	#      specification).
+	#      This means that when processing 2.4 files we should perform all the
+	#      unsynchronisation processing at the frame level, not the tag level.
+	#      The tag unsync bit is redundant (IMO).
+	if ($v2h->{major_version} == 4) {
 		$v2h->{unsync} = 0
-        }
+	}
 
 	$wholetag =~ s/\xFF\x00/\xFF/gs if $v2h->{unsync};
 
@@ -1264,6 +1276,8 @@ sub _get_v2tagdata {
 	# files - and in any case couldn't guarentee I'd get it right.
 
 	$myseek = sub {
+		return unless $wholetag;
+		
 		my $bytes = substr($wholetag, $off, $hlen);
 
 		# iTunes is stupid and sticks ID3v2.2 3 byte frames in a
@@ -1551,19 +1565,19 @@ On error, returns nothing and sets C<$@>.
 
 sub get_mp3info {
 	my($file) = @_;
-	my($off, $byte, $eof, $h, $tot, $fh, $max);
+	my($off, $byte, $eof, $h, $tot, $fh);
 
 	if (not (defined $file && $file ne '')) {
 		$@ = "No file specified";
 		return undef;
 	}
-
-	$max = (-s $file); # total size of file
+	
+	my $size = -s $file;
 
 	if (ref $file) { # filehandle passed
 		$fh = $file;
 	} else {
-		if (!$max) {
+		if ( !$size ) {
 			$@ = "File is empty";
 			return undef;
 		}
@@ -1588,6 +1602,12 @@ sub get_mp3info {
 
 	if (my $v2h = _get_v2head($fh)) {
 		$tot += $off += $v2h->{tag_size};
+		
+		if ( $off > $size - 10 ) {
+			# Invalid v2 tag size
+			$off = 0;
+		}
+		
 		seek $fh, $off, SEEK_SET;
 		read $fh, $byte, 4;
 	}
@@ -1601,7 +1621,7 @@ sub get_mp3info {
 		# do only one read - it's _much_ faster
 		$off++;
 		seek $fh, $off, SEEK_SET;
-		my $bytesread = read $fh, $byte, $tot;
+		read $fh, $byte, $tot;
 		 
 		my $i;
 		 
@@ -1628,18 +1648,11 @@ sub get_mp3info {
 			     '$MP3::Info::try_harder and retry)';
 			return undef;
 		}
-
-		if (!$bytesread && ($off >= $max)) {
-			_close($file, $fh);
-			$@ = "Couldn't find MP3 header (searched entire file)";
-			return undef;
-		}
 	}
 	
 	$h->{offset} = $off;
 
-	my $vbr = _get_vbr($fh, $h, \$off);
-	
+	my $vbr  = _get_vbr($fh, $h, \$off);
 	my $lame = _get_lame($fh, $h, \$off);
 	
 	seek $fh, 0, SEEK_END;
@@ -1671,26 +1684,30 @@ sub _get_info {
 		return {};
 	}
 
-	$i->{VERSION}	= $h->{IDR} == 2 ? 2 : $h->{IDR} == 3 ? 1 :
-				$h->{IDR} == 0 ? 2.5 : 0;
+	$i->{VERSION}	= $h->{IDR} == 2 ? 2 : $h->{IDR} == 3 ? 1 : $h->{IDR} == 0 ? 2.5 : 0;
 	$i->{LAYER}	= 4 - $h->{layer};
-	$i->{VBR}	= defined $vbr ? 1 : 0;
+
+	if (ref($vbr) eq 'HASH' and $vbr->{is_vbr} == 1) {
+		$i->{VBR} = 1;
+	} else {
+		$i->{VBR} = 0;
+	}
 
 	$i->{COPYRIGHT}	= $h->{copyright} ? 1 : 0;
 	$i->{PADDING}	= $h->{padding_bit} ? 1 : 0;
 	$i->{STEREO}	= $h->{mode} == 3 ? 0 : 1;
 	$i->{MODE}	= $h->{mode};
 
-	$i->{SIZE}	= $vbr && $vbr->{bytes} ? $vbr->{bytes} : $h->{size};
+	$i->{SIZE}	= $i->{VBR} == 1 && $vbr->{bytes} ? $vbr->{bytes} : $h->{size};
 	$i->{OFFSET}	= $h->{offset};
 
 	my $mfs		= $h->{fs} / ($h->{ID} ? 144000 : 72000);
-	$i->{FRAMES}	= int($vbr && $vbr->{frames}
+	$i->{FRAMES}	= int($i->{VBR} == 1 && $vbr->{frames}
 				? $vbr->{frames}
 				: $i->{SIZE} / ($h->{bitrate} / $mfs)
 			  );
 
-	if ($vbr) {
+	if ($i->{VBR} == 1) {
 		$i->{VBR_SCALE}	= $vbr->{scale} if $vbr->{scale};
 		$h->{bitrate}	= $i->{SIZE} / $i->{FRAMES} * $mfs;
 		if (not $h->{bitrate}) {
@@ -1787,8 +1804,9 @@ sub _vbr_seek {
 }
 
 sub _get_vbr {
-	my($fh, $h, $roff) = @_;
-	my($off, $bytes, @bytes, %vbr);
+	my ($fh, $h, $roff) = @_;
+	my ($off, $bytes, @bytes);
+	my %vbr = (is_vbr => 0);
 
 	$off = $$roff;
 
@@ -1801,35 +1819,58 @@ sub _get_vbr {
 	}
 
 	_vbr_seek($fh, \$off, \$bytes);
-	return unless $bytes =~ /(?:Xing|Info)/;
 
-	_vbr_seek($fh, \$off, \$bytes);
-	$vbr{flags} = _unpack_head($bytes);
+	if ($bytes =~ /(?:Xing|Info)/) {
+		# Info is CBR
+		$vbr{is_vbr} = 1 if $bytes =~ /Xing/;
 
-	if ($vbr{flags} & 1) {
 		_vbr_seek($fh, \$off, \$bytes);
-		$vbr{frames} = _unpack_head($bytes);
-	}
+		$vbr{flags} = _unpack_head($bytes);
+	
+		if ($vbr{flags} & 1) {
+			_vbr_seek($fh, \$off, \$bytes);
+			$vbr{frames} = _unpack_head($bytes);
+		}
+	
+		if ($vbr{flags} & 2) {
+			_vbr_seek($fh, \$off, \$bytes);
+			$vbr{bytes} = _unpack_head($bytes);
+		}
+	
+		if ($vbr{flags} & 4) {
+			_vbr_seek($fh, \$off, \$bytes, 100);
+			# Not used right now ...
+			#$vbr{toc} = _unpack_head($bytes);
+		}
+	
+		if ($vbr{flags} & 8) { # (quality ind., 0=best 100=worst)
+			_vbr_seek($fh, \$off, \$bytes);
+			$vbr{scale} = _unpack_head($bytes);
+		} else {
+			$vbr{scale} = -1;
+		}
 
-	if ($vbr{flags} & 2) {
+		$$roff = $off;
+	} elsif ($bytes =~ /(?:VBRI)/) {
+		$vbr{is_vbr} = 1;
+		
+		# Fraunhofer encoder uses VBRI format
+		# start with quality factor at position 8
+		_vbr_seek($fh, \$off, \$bytes, 4);
+		_vbr_seek($fh, \$off, \$bytes, 2);
+		$vbr{scale} = unpack('l', pack('L', unpack('n', $bytes)));
+
+		# Then Bytes, as position 10
 		_vbr_seek($fh, \$off, \$bytes);
 		$vbr{bytes} = _unpack_head($bytes);
-	}
 
-	if ($vbr{flags} & 4) {
-		_vbr_seek($fh, \$off, \$bytes, 100);
-# Not used right now ...
-#		$vbr{toc} = _unpack_head($bytes);
-	}
-
-	if ($vbr{flags} & 8) { # (quality ind., 0=best 100=worst)
+		# Finally Frames at position 14
 		_vbr_seek($fh, \$off, \$bytes);
-		$vbr{scale} = _unpack_head($bytes);
-	} else {
-		$vbr{scale} = -1;
+		$vbr{frames} = _unpack_head($bytes);
+
+		$$roff = $off;
 	}
 
-	$$roff = $off;
 	return \%vbr;
 }
 
@@ -2074,7 +2115,7 @@ sub _get_v2foot {
 
 sub _find_id3_chunk {
 	my($fh, $filetype) = @_;
-	my($bytes, $size, $tag, $pat, $mat);
+	my($bytes, $size, $tag, $pat, @mat);
 
 	# CHANGE 10616 introduced a read optimization in _get_v2head:
 	#  10 bytes are read, not 3, so reading one here hoping to get the last letter of the
@@ -2084,17 +2125,19 @@ sub _find_id3_chunk {
 	if ($filetype eq 'RIF') {  # WAV
 #		return 0 if $bytes ne 'F';
 		$pat = 'a4V';
-		$mat = 'id3 ';
+		@mat = ('id3 ', 'ID32');
 	} elsif ($filetype eq 'FOR') { # AIFF
 #		return 0 if $bytes ne 'M';
 		$pat = 'a4N';
-		$mat = 'ID3 ';
+		@mat = ('ID3 ', 'ID32');
 	}
 	seek $fh, 12, SEEK_SET;  # skip to the first chunk
 
 	while ((read $fh, $bytes, 8) == 8) {
 		($tag, $size)  = unpack $pat, $bytes;
-		return 1 if $tag eq $mat;
+		for my $mat ( @mat ) {
+			return 1 if $tag eq $mat;
+		}
 		seek $fh, $size, SEEK_CUR;
 	}
 
@@ -2787,6 +2830,7 @@ Tony Bowden,
 Tom Brown,
 Sergio Camarena,
 Chris Dawson,
+Kevin Deane-Freeman,
 Anthony DiSante,
 Luke Drumm,
 Kyle Farrell,
@@ -2794,6 +2838,7 @@ Jeffrey Friedl,
 brian d foy,
 Ben Gertzfield,
 Brian Goodwin,
+Andy Grundman,
 Todd Hanneken,
 Todd Harris,
 Woodrow Hill,
@@ -2836,7 +2881,7 @@ Justin Fletcher.
 
 =head1 CURRENT AUTHOR 
 
-Dan Sully E<lt>dan | at | slimdevices.comE<gt> & Logitech.
+Dan Sully E<lt>daniel | at | cpan.orgE<gt> & Logitech.
 
 =head1 AUTHOR EMERITUS
 
@@ -2844,8 +2889,7 @@ Chris Nandor E<lt>pudge@pobox.comE<gt>, http://pudge.net/
 
 =head1 COPYRIGHT AND LICENSE 
 
-Copyright (c) 2006-2007 Dan Sully & Logitech. All rights reserved. 
-Copyright (c) 2008 Dan Sully. All rights reserved. 
+Copyright (c) 2006-2008 Dan Sully & Logitech. All rights reserved. 
 
 Copyright (c) 1998-2005 Chris Nandor. All rights reserved. 
 
@@ -2888,6 +2932,7 @@ the same terms as Perl itself.
 =item Xmms
 
 	http://www.xmms.org/
+
 
 =back
 
