@@ -37,7 +37,7 @@ use vars qw(
 
 # $Id$
 ($REVISION) = ' $Revision: 1.19 $ ' =~ /\$Revision:\s+([^\s]+)/;
-$VERSION = '1.23';
+$VERSION = '1.24';
 
 # JRF: Whether we're debugging the ID3v2.4 support
 $debug_24 = 0;
@@ -999,6 +999,11 @@ sub _parse_v2tag {
 					#        raw_v2 = 1 => don't parse
 					#        raw_v2 = 2 => do split into arrayrefs
 					
+					# Strip off any trailing NULs, which would indicate an empty
+					# field and cause an array with no elements to be created.
+					$data =~ s/\x00+$//;
+
+					
 					if ($data =~ /\x00/ && ($raw_v2 == 2 || $raw_v2 == 0))
 					{
 						# There are embedded nuls in the string, which means an ID3v2.4
@@ -1546,17 +1551,19 @@ On error, returns nothing and sets C<$@>.
 
 sub get_mp3info {
 	my($file) = @_;
-	my($off, $byte, $eof, $h, $tot, $fh);
+	my($off, $byte, $eof, $h, $tot, $fh, $max);
 
 	if (not (defined $file && $file ne '')) {
 		$@ = "No file specified";
 		return undef;
 	}
 
+	$max = (-s $file); # total size of file
+
 	if (ref $file) { # filehandle passed
 		$fh = $file;
 	} else {
-		if (not -s $file) {
+		if (!$max) {
 			$@ = "File is empty";
 			return undef;
 		}
@@ -1594,7 +1601,7 @@ sub get_mp3info {
 		# do only one read - it's _much_ faster
 		$off++;
 		seek $fh, $off, SEEK_SET;
-		read $fh, $byte, $tot;
+		my $bytesread = read $fh, $byte, $tot;
 		 
 		my $i;
 		 
@@ -1619,6 +1626,12 @@ sub get_mp3info {
 			_close($file, $fh);
 			$@ = "Couldn't find MP3 header (perhaps set " .
 			     '$MP3::Info::try_harder and retry)';
+			return undef;
+		}
+
+		if (!$bytesread && ($off >= $max)) {
+			_close($file, $fh);
+			$@ = "Couldn't find MP3 header (searched entire file)";
 			return undef;
 		}
 	}
@@ -2224,6 +2237,15 @@ sub _parse_ape_tag {
 
 		my $ape_header_data = substr($ape_tag_data, 0, $ape_tag_header_size, '');
 		my $ape_header      = _parse_ape_header_or_footer($ape_header_data);
+		
+		if ( defined $ape_header->{'version'} ) {
+			if ( $ape_header->{'version'} == 2000 ) {
+				$info->{'TAGVERSION'} = 'APEv2';
+			}
+			else {
+				$info->{'TAGVERSION'} = 'APEv1';
+			}
+		}
 
 		if (defined $ape_header->{'tag_items'} && $ape_header->{'tag_items'} =~ /^\d+$/) {
 
@@ -2823,6 +2845,7 @@ Chris Nandor E<lt>pudge@pobox.comE<gt>, http://pudge.net/
 =head1 COPYRIGHT AND LICENSE 
 
 Copyright (c) 2006-2007 Dan Sully & Logitech. All rights reserved. 
+Copyright (c) 2008 Dan Sully. All rights reserved. 
 
 Copyright (c) 1998-2005 Chris Nandor. All rights reserved. 
 
