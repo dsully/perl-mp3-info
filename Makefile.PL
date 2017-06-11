@@ -1,5 +1,7 @@
 # $Id: Makefile.PL 10 1998-12-16 23:02:45Z daniel $
 
+use lib ".";
+
 use inc::Module::Install;
 
 name('MP3-Info');

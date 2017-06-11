@@ -3,3 +3,5 @@ blib/
 inc/
 Makefile
 *.gz
+MYMETA.json
+MYMETA.yml
