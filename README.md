@@ -2,10 +2,8 @@
 
 This is MP3::Info, for getting info out of and into MP3 files.
 
-This archive can always be obtained from:
-
-    http://www.cpan.org/authors/id/DANIEL/
-    http://www.cpan.org/modules/by-module/MP3/
+This archive can always be obtained from CPAN at
+    http://www.cpan.org/authors/id/DANIEL/ or http://www.cpan.org/modules/by-module/MP3/
 
 Please let me know how well it does(n't) work, and any changes you'd 
 like to see. 
