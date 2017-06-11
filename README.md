@@ -1,3 +1,5 @@
+# Info
+
 This is MP3::Info, for getting info out of and into MP3 files.
 
 This archive can always be obtained from:
@@ -5,14 +7,25 @@ This archive can always be obtained from:
     http://www.cpan.org/authors/id/DANIEL/
     http://www.cpan.org/modules/by-module/MP3/
 
-The project homepage is:
-
-    http://www.slimdevices.com/
-
 Please let me know how well it does(n't) work, and any changes you'd 
 like to see. 
 
 Thanks to all of the people who have sent me feedback and ideas.
+
+## Install
+
+You can install this module in the usual Perl way, from CPAN. If you
+obtained it from GitHub,
+
+	cpanm --installdeps . 
+	
+And then
+
+	perl Makefile.PL
+	make
+	make install
+
+## License
 
 Copyright (c) 2006-2008 Dan Sully & Slim Devices, Inc.
 
