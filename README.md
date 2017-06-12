@@ -1,5 +1,7 @@
 # Info
 
+[![Build Status](https://travis-ci.org/JJ/perl-mp3-info.svg?branch=master)](https://travis-ci.org/JJ/perl-mp3-info)
+
 This is MP3::Info, for getting info out of and into MP3 files.
 
 This archive can always be obtained from CPAN at

@@ -652,7 +652,8 @@ sub _get_v1tag {
 				# Remove garbage and retry
 				# (string is truncated in the
 				# middle of a multibyte char?)
-				$value =~ s/(.)$//;
+				# Changed thanks to https://rt.cpan.org/Ticket/Display.html?id=101620
+				substr($value, -1, 1, '');
 			}
 		}
 
