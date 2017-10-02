@@ -1,5 +1,6 @@
 package MP3::Info;
 
+# JJ: fixed bugs and stuff and added META info
 # JRF: Added support for ID3v2.4 spec-valid frame size processing (falling back to old
 #      non-spec valid frame size processing)
 #      Added support for ID3v2.4 footers.
@@ -37,7 +38,7 @@ use vars qw(
 
 # $Id$
 ($REVISION) = ' $Revision$ ' =~ /\$Revision:\s+([^\s]+)/;
-$VERSION = '1.24';
+$VERSION = '1.25';
 
 # JRF: Whether we're debugging the ID3v2.4 support
 $debug_24 = 0;
