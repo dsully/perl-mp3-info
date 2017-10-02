@@ -27,6 +27,8 @@ And then
 
 ## License
 
+Copyright (c) 2017 JJ Merelo
+
 Copyright (c) 2006-2008 Dan Sully & Slim Devices, Inc.
 
 Copyright (c) 1998-2005 Chris Nandor.
