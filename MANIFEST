@@ -3,6 +3,7 @@ Info.pm
 Makefile.PL
 MANIFEST
 README.md
+META.yml
 eg/mp3tag.PL
 eg/mp3tocddb.PL
 t/getset.t
