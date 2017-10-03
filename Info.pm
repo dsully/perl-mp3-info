@@ -38,7 +38,7 @@ use vars qw(
 
 # $Id$
 ($REVISION) = ' $Revision$ ' =~ /\$Revision:\s+([^\s]+)/;
-$VERSION = '1.25';
+$VERSION = '1.25.1'; # Just adds metadata 
 
 # JRF: Whether we're debugging the ID3v2.4 support
 $debug_24 = 0;

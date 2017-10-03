@@ -25,6 +25,10 @@ And then
 	make
 	make install
 
+## Thanks
+
+To Paul Cochrane for support and advice.
+
 ## License
 
 Copyright (c) 2017 JJ Merelo
